@@ -1,0 +1,53 @@
+# Fitcheck
+
+A clothing size recommendation app that compares body measurements with brand size charts and displays an estimated fit score.
+
+## Run locally
+
+Requires Node.js 22 or newer. No API key or npm dependencies are required by the server.
+
+```sh
+npm start
+```
+
+Open http://localhost:3000. On Windows PowerShell, use `npm.cmd start` if script execution is disabled. To use port 3001:
+
+```powershell
+$env:PORT="3001"
+npm.cmd start
+```
+
+## Features
+
+- Body measurements saved in browser local storage.
+- Tops/bottoms and gender filters, with close, regular and relaxed fit preferences.
+- Product link import for accessible HTML size tables.
+- Size chart photo recognition with image enhancement, positional row reconstruction and targeted number rereading.
+- Automatic inches/centimetres detection, with a unit choice when uncertain.
+- Remove uploaded photos and see the fit score before detailed results.
+
+## Tests
+
+```sh
+npm test
+```
+
+## Architecture
+
+- `server.mjs`: local HTTP server and import, parse and comparison endpoints.
+- `extract.mjs`: product metadata and chart parsing.
+- `fit.mjs`: rule-based fit scoring.
+- `public/`: browser interface and photo recognition.
+- `test/`: scoring, parsing, OCR reconstruction and server regression checks.
+
+## Limitations and privacy
+
+The score is a heuristic, not a probability or a guarantee of fit. OCR can misread poor images. Missing measurements, fabric stretch and garment cuts affect accuracy. This app does not train a machine-learning model from uploads.
+
+Photo recognition runs in the browser using Tesseract.js loaded from a CDN; internet access is needed for the reader and language assets. Extracted chart data and body measurements go to the local server for comparison. Retailer imports can fail for blocked or JavaScript-only pages.
+
+The server binds to loopback. This is a local application, not a production multi-user service. GitHub Pages alone cannot run the Node API.
+
+## Font attribution
+
+The included Scota font is a demo by Limitype. See `public/fonts/Scota-Readme.txt`. A commercial license is not included; check the vendor terms before commercial use.
