@@ -59,9 +59,9 @@ $('#import-form').addEventListener('submit', async e => {
       const keys = ['size','chest','shoulder','waist','hip','length','inseam'].filter(k => chart.some(r => r[k] != null));
       $('#chart-text').value = [keys.join(','), ...chart.map(r => keys.map(k => r[k] ?? '').join(','))].join('\n'); $('#chart-unit').value = 'cm';
       notice('Chart loaded. Ready to compare.', true);
-    } else notice('Product details found, but no readable size table. Copy the store’s chart into the box below. Charts shown as images or loaded after a click need manual entry.');
+    } else notice('Product details found, but no readable size table. Upload a photo of the brand size chart below.');
   } catch (err) { notice(err.message); $('#chart-details').open = false; }
-  finally { $('#import').disabled = false; $('#import').innerHTML = 'Find my fit <span>→</span>'; }
+  finally { $('#import').disabled = false; $('#import').textContent = 'Read link ↗'; }
 });
 $('#apply-chart').addEventListener('click', async () => {
   try { referenceCategory = null; const parsed = await api('parse', {text:$('#chart-text').value, unit:$('#chart-unit').value}); chart = parsed.chart; preview(); if (!chart.length) throw new Error('No size rows found. Include a Size header and separate the columns with commas or tabs.'); $('#chart-details').open = false; notice('Chart ready. Compare sizes when you are ready.', true); }
@@ -80,7 +80,7 @@ $('#calculate').addEventListener('click', async () => {
     const { results } = await api('check', {profile,chart,category,basis:$('#basis').value,preference:preference()});
     const usable = results.filter(r => r.score !== null); if (!usable.length) throw new Error('The chart and your measurements have no matching fields. Add the relevant measurements first.');
     const best = usable[0], recommended = best.score >= 75;
-    $('#results').innerHTML = `<div class="recommend"><div class="score-hero"><p class="eyebrow">YOUR FIT SCORE</p><div class="score-value">${best.score}<span>/100</span></div><p class="score-rating">${escape(best.label)}</p></div><div class="recommend-copy"><p class="eyebrow">${recommended ? 'YOUR CLOSEST MATCH' : 'NO STRONG MATCH'}</p><h3>${recommended ? `Size ${escape(best.size)}` : 'Try another cut'} <span style="font-size:13px;font-weight:500">${escape(best.label)}</span></h3><p>${recommended ? 'Best match among the sizes in this chart.' : `Size ${escape(best.size)} scores highest, but may not fit comfortably.`}<br>${referenceCategory ? 'Low confidence — general reference only' : escape(best.confidence) + ' confidence'}</p></div></div><details class="fit-details"><summary>View fit details <span>+</span></summary><div class="breakdown"><h3>Your size breakdown</h3>${results.map(r => `<div class="size-result"><div class="size-line"><span class="size-label">${escape(r.size)}</span><span class="rating">${escape(r.label)}</span><span class="score-text">${r.score === null ? '—' : `${r.score}/100`}</span></div><div class="bar"><span style="width:${r.score ?? 0}%"></span></div><div class="dimension-list">${r.details.map(d => `<span class="${d.score < 90 ? 'warning' : ''}" title="Your measurement: ${d.body} cm; chart: ${escape(d.chart)} cm">${escape(names[d.field])}: ${escape(d.note)}</span>`).join('')}</div></div>`).join('')}</div><p class="disclaimer">This is a rule-based estimate, not a probability or a guarantee. Scores compare chart measurements with your body and general fit allowances. Height alone cannot predict garment length. Stretch, tailoring, oversized cuts and personal preference may change the result. Missing measurements reduce confidence.</p></details>`;
+    $('#results').innerHTML = `<div class="recommend"><div class="score-hero"><p class="eyebrow">YOUR FIT SCORE</p><div class="score-value">${best.score}<span>/100</span></div><p class="score-rating">${escape(best.label)}</p></div><div class="recommend-copy"><p class="eyebrow">${recommended ? 'YOUR CLOSEST MATCH' : 'NO STRONG MATCH'}</p><h3>${recommended ? `Size ${escape(best.size)}` : `Closest: ${escape(best.size)}`} <span style="font-size:13px;font-weight:500">${escape(best.label)}</span></h3><p>${recommended ? 'Best match among the sizes in this chart.' : `Size ${escape(best.size)} scores highest, but may not fit comfortably.`}<br>${referenceCategory ? 'Low confidence — general reference only' : escape(best.confidence) + ' confidence'}</p></div></div><details class="fit-details"><summary>View fit details <span>+</span></summary><div class="breakdown"><h3>Your size breakdown</h3>${results.map(r => `<div class="size-result"><div class="size-line"><span class="size-label">${escape(r.size)}</span><span class="rating">${escape(r.label)}</span><span class="score-text">${r.score === null ? '—' : `${r.score}/100`}</span></div><div class="bar"><span style="width:${r.score ?? 0}%"></span></div><div class="dimension-list">${r.details.map(d => `<span class="${d.score < 90 ? 'warning' : ''}" title="Your measurement: ${d.body} cm; chart: ${escape(d.chart)} cm">${escape(names[d.field])}: ${escape(d.note)}</span>`).join('')}</div></div>`).join('')}</div><p class="disclaimer">This is a rule-based estimate, not a probability or a guarantee. Scores compare chart measurements with your body and general fit allowances. Height alone cannot predict garment length. Stretch, tailoring, oversized cuts and personal preference may change the result. Missing measurements reduce confidence.</p></details>`;
     $('#results').hidden = false; $('#results').focus({preventScroll:true}); $('#results').scrollIntoView({behavior:'auto',block:'start'}); store(); notice(referenceCategory ? 'Estimate ready. Based on general sizing.' : 'Your comparison is ready.',true);
   } catch (err) { notice(err.message); } finally { $('#calculate').disabled = false; }
 });
@@ -422,3 +422,23 @@ $('#photo-unit-choice').addEventListener('click', async e => {
   } catch (err) { if (pending.job === photoJob) $('#photo-status').textContent = err.message; }
   finally { buttons.forEach(button => button.disabled = false); }
 });
+
+// Studio interactions stay independent of chart parsing and scoring.
+const garment = document.querySelector('#garment-object');
+const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
+let garmentTurn = -12;
+function turnGarment(delta) { garmentTurn = Math.max(-50, Math.min(50, garmentTurn + delta)); garment.style.setProperty('--turn', `${garmentTurn}deg`); }
+$('#rotate-left').addEventListener('click', () => turnGarment(-15));
+$('#rotate-right').addEventListener('click', () => turnGarment(15));
+$('#reset-garment').addEventListener('click', () => { garmentTurn = 0; turnGarment(0); });
+garment.addEventListener('pointermove', e => { if (e.pointerType !== 'mouse' || reducedMotion.matches) return; const rect = garment.getBoundingClientRect(); garment.style.setProperty('--turn', `${garmentTurn + (e.clientX-rect.left-rect.width/2)/rect.width*14}deg`); });
+garment.addEventListener('pointerleave', () => turnGarment(0));
+$('#profile-form').addEventListener('focusin', e => { const field=e.target.id; document.querySelectorAll('[data-guide]').forEach(g=>g.classList.toggle('active',g.dataset.guide===field)); $('#guide-caption').textContent = names[field] ? `${names[field].toUpperCase()} / MEASURE YOURSELF, NOT THE ILLUSTRATION` : 'FOCUS A MEASUREMENT TO SEE ITS GUIDE'; });
+$('#profile-form').addEventListener('focusout', () => { document.querySelectorAll('[data-guide]').forEach(g=>g.classList.remove('active')); $('#guide-caption').textContent = 'FOCUS A MEASUREMENT TO SEE ITS GUIDE'; });
+$('#categories').addEventListener('click', () => { $('#required-note').textContent = category==='tops' ? 'Chest is required for tops. Everything else refines the estimate.' : 'Waist is required for bottoms. Everything else refines the estimate.'; });
+const dropZone=$('#chart-photo-form');
+for(const event of ['dragenter','dragover']) dropZone.addEventListener(event,e=>{e.preventDefault();if(!$('#chart-photo').disabled)dropZone.classList.add('dragging');});
+dropZone.addEventListener('dragleave',e=>{if(!dropZone.contains(e.relatedTarget))dropZone.classList.remove('dragging');});
+dropZone.addEventListener('drop',e=>{e.preventDefault();dropZone.classList.remove('dragging');if($('#chart-photo').disabled)return;const files=e.dataTransfer.files;if(files.length!==1){$('#photo-status').textContent='Please drop one size-chart image at a time.';return;}$('#chart-photo').files=files;$('#chart-photo').dispatchEvent(new Event('change',{bubbles:true}));});
+document.addEventListener('visibilitychange',()=>document.body.classList.toggle('page-hidden',document.hidden));
+new IntersectionObserver(entries=>{for(const entry of entries)entry.target.style.animationPlayState=entry.isIntersecting?'running':'paused';}).observe($('.scan-loader span'));
