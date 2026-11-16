@@ -43,7 +43,7 @@ export async function handleRequest(req, res) {
   const json = (code, data) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(data)); };
   try {
     if (req.method === 'POST' && ['/api/import','/api/check','/api/parse'].includes(req.url)) {
-      if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return json(403, { error: 'Cross-origin request rejected.' });
+      if (req.headers.origin && ![`http://${req.headers.host}`, `https://${req.headers.host}`].includes(req.headers.origin)) return json(403, { error: 'Cross-origin request rejected.' });
       let raw = ''; for await (const chunk of req) { raw += chunk; if (raw.length > 60000) return json(413, { error: 'Input is too large.' }); }
       const body = JSON.parse(raw);
       if (req.url === '/api/import') return json(200, await productPage(body.url));
@@ -53,7 +53,13 @@ export async function handleRequest(req, res) {
     }
     if (req.method !== 'GET') return json(405, { error: 'Method not allowed' });
     const files = { '/brand-mark.svg': ['brand-mark.svg','image/svg+xml'], '/': ['index.html','text/html'], '/app.js': ['app.js','text/javascript'], '/style.css': ['style.css','text/css'] };
-    const file = files[req.url?.split('?')[0]];
+    const pathname = req.url?.split('?')[0];
+    if (pathname === '/extract.mjs' || pathname === '/fit.mjs') {
+      const source = await readFile(new URL(`.${pathname}`, import.meta.url));
+      res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'X-Content-Type-Options': 'nosniff' });
+      return res.end(source);
+    }
+    const file = files[pathname];
     if (!file) return json(404, { error: 'Not found' });
     res.writeHead(200, { 'Content-Type': `${file[1]}; charset=utf-8`, 'X-Content-Type-Options': 'nosniff' }); res.end(await readFile(root + file[0]));
   } catch (e) { json(400, { error: e.message || 'Something went wrong.' }); }
@@ -61,3 +67,5 @@ export async function handleRequest(req, res) {
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   http.createServer(handleRequest).listen(Number(process.env.PORT) || 3000, '127.0.0.1', () => console.log('Fitcheck is ready at http://localhost:3000'));
 }
+
+

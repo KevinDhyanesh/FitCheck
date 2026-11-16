@@ -1,3 +1,5 @@
+import { parseChart } from '/extract.mjs';
+import { scoreSizes } from '/fit.mjs';
 const $ = s => document.querySelector(s);
 const names = { height: 'Height', chest: 'Chest', waist: 'Waist', hip: 'Hips', shoulder: 'Shoulders', length: 'Desired top length', inseam: 'Desired inseam' };
 let unit = 'cm', category = 'tops', chart = [], product = null;
@@ -6,17 +8,33 @@ let gender = 'women';
 let analyzedGender = null;
 let analyzedCategory = null;
 const escape = v => String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-$('#measurements').innerHTML = Object.entries(names).map(([key,label]) => `<label for="${key}">${label}<div class="input-wrap"><input id="${key}" name="${key}" type="number" min="1" max="300" step="0.1" placeholder="—"><span class="measurement-unit">cm</span></div></label>`).join('');
+$('#measurements').innerHTML = Object.entries(names).map(([key,label]) => `<label for="${key}">${label}<div class="input-wrap"><input id="${key}" name="${key}" type="number" min="1" max="300" step="0.1" placeholder="-"><span class="measurement-unit">cm</span></div></label>`).join('');
 function readProfile() { return Object.fromEntries(Object.keys(names).map(key => [key, $(`#${key}`).value ? +(+$(`#${key}`).value * (unit === 'in' ? 2.54 : 1)).toFixed(2) : null])); }
 function preference() { return $('input[name=preference]:checked').value; }
 function invalidate() { $('#results').hidden = true; }
 function notice(message, success = false) { $('#status').innerHTML = `<div class="notice ${success ? 'success' : ''}">${escape(message)}</div>`; }
 async function api(route, data) {
-  const response = await fetch(`/api/${route}`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
-  const result = await response.json(); if (!response.ok) throw new Error(result.error); return result;
+  // Parsing and comparison are pure computations; a server outage must not
+  // prevent a successfully read photo from producing a comparison.
+  if (route === 'parse') return { chart: parseChart(data.text || '', data.unit) };
+  if (route === 'check') return { results: scoreSizes(data.profile, data.chart, data) };
+  let response;
+  try {
+    response = await fetch(`/api/${route}`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data), signal:AbortSignal.timeout(55000) });
+  } catch (error) {
+    throw new Error(error.name === 'TimeoutError'
+      ? 'The product import timed out. Retry or upload the store's size chart.'
+      : 'Cannot reach the Fitcheck server. Start it with npm start and open its localhost URL. You can still upload or paste a size chart.');
+  }
+  let result;
+  try { result = await response.json(); }
+  catch { throw new Error('The product API returned a webpage instead of data. Open Fitcheck through its Node server, not a static preview. You can still upload or paste a size chart.'); }
+  if (!response.ok) throw new Error(result.error || `Product import failed (HTTP ${response.status}). Upload or paste the size chart instead.`);
+  if (!result || !Array.isArray(result.chart)) throw new Error('The product API returned an invalid response. Upload or paste the store's size chart.');
+  return result;
 }
 function store() {
-  try { localStorage.setItem('fitcheck-profile', JSON.stringify({ profile: readProfile(), preference: preference() })); $('#save-note').textContent = '✓ Measurements saved on this browser.'; }
+  try { localStorage.setItem('fitcheck-profile', JSON.stringify({ profile: readProfile(), preference: preference() })); $('#save-note').textContent = '� Measurements saved on this browser.'; }
   catch { $('#save-note').textContent = 'Storage unavailable. You can still check your fit.'; }
 }
 try { const saved = JSON.parse(localStorage.getItem('fitcheck-profile')); if (saved?.profile) { for (const key of Object.keys(names)) $(`#${key}`).value = saved.profile[key] || ''; const radio = $(`input[name=preference][value="${['close','regular','relaxed'].includes(saved.preference) ? saved.preference : 'regular'}"]`); radio.checked = true; } } catch {}
@@ -42,8 +60,9 @@ $('#gender-filter').addEventListener('click', e => {
   invalidate(); notice('Gender changed. Read the matching chart photo to continue.');
 });
 function preview() {
+  $('#chart-details').hidden = false;
   const keys = ['size','chest','shoulder','waist','hip','length','inseam'].filter(k => chart.some(r => r[k] != null));
-  $('#chart-preview').innerHTML = chart.length ? `<div class="table-scroll"><table><caption class="sr-only">Size chart in centimetres</caption><thead><tr>${keys.map(k => `<th>${escape(k === 'size' ? k : names[k])}${k === 'size' ? '' : ' (cm)'}</th>`).join('')}</tr></thead><tbody>${chart.map(r => `<tr>${keys.map(k => `<td>${escape(r[k] ?? '—')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : '';
+  $('#chart-preview').innerHTML = chart.length ? `<div class="table-scroll"><table><caption class="sr-only">Size chart in centimetres</caption><thead><tr>${keys.map(k => `<th>${escape(k === 'size' ? k : names[k])}${k === 'size' ? '' : ' (cm)'}</th>`).join('')}</tr></thead><tbody>${chart.map(r => `<tr>${keys.map(k => `<td>${escape(r[k] ?? '-')}</td>`).join('')}</tr>`).join('')}</tbody></table></div>` : '';
   $('#calculate').hidden = !chart.length; $('#empty').hidden = !!chart.length; invalidate();
 }
 function showProduct() {
@@ -52,19 +71,19 @@ function showProduct() {
   $('#source-link').hidden = !product.url; if (product.url) $('#source-link').href = product.url;
 }
 $('#import-form').addEventListener('submit', async e => {
-  e.preventDefault(); referenceCategory = null; chart = []; product = null; preview(); showProduct(); $('#chart-text').value = ''; $('#import').disabled = true; $('#import').textContent = 'Reading…'; notice('Looking for product details and a size table…');
+  e.preventDefault(); referenceCategory = null; chart = []; product = null; preview(); showProduct(); $('#chart-text').value = ''; $('#import').disabled = true; $('#import').textContent = 'Reading.'; notice('Looking for product details and a size table.');
   try {
-    product = await api('import', {url:$('#url').value}); chart = product.chart; showProduct(); preview(); $('#chart-details').open = false;
+    product = await api('import', {url:$('#url').value}); chart = product.chart; showProduct(); preview(); $('#chart-details').hidden = false;
     if (chart.length) {
       const keys = ['size','chest','shoulder','waist','hip','length','inseam'].filter(k => chart.some(r => r[k] != null));
       $('#chart-text').value = [keys.join(','), ...chart.map(r => keys.map(k => r[k] ?? '').join(','))].join('\n'); $('#chart-unit').value = 'cm';
       notice('Chart loaded. Ready to compare.', true);
     } else notice('Product details found, but no readable size table. Upload a photo of the brand size chart below.');
-  } catch (err) { notice(err.message); $('#chart-details').open = false; }
-  finally { $('#import').disabled = false; $('#import').textContent = 'Read link ↗'; }
+  } catch (err) { notice(err.message); $('#chart-details').hidden = false; }
+  finally { $('#import').disabled = false; $('#import').textContent = 'Read link ?'; }
 });
 $('#apply-chart').addEventListener('click', async () => {
-  try { referenceCategory = null; const parsed = await api('parse', {text:$('#chart-text').value, unit:$('#chart-unit').value}); chart = parsed.chart; preview(); if (!chart.length) throw new Error('No size rows found. Include a Size header and separate the columns with commas or tabs.'); $('#chart-details').open = false; notice('Chart ready. Compare sizes when you are ready.', true); }
+  try { referenceCategory = null; const parsed = await api('parse', {text:$('#chart-text').value, unit:$('#chart-unit').value}); chart = parsed.chart; preview(); if (!chart.length) throw new Error('No size rows found. Include a Size header and separate the columns with commas or tabs.'); $('#chart-details').hidden = false; notice('Chart ready. Compare sizes when you are ready.', true); }
   catch (err) { notice(err.message); }
 });
 $('#chart-text').addEventListener('input', () => { referenceCategory = null; chart = []; preview(); });
@@ -80,16 +99,16 @@ $('#calculate').addEventListener('click', async () => {
     const { results } = await api('check', {profile,chart,category,basis:$('#basis').value,preference:preference()});
     const usable = results.filter(r => r.score !== null); if (!usable.length) throw new Error('The chart and your measurements have no matching fields. Add the relevant measurements first.');
     const best = usable[0], recommended = best.score >= 75;
-    $('#results').innerHTML = `<div class="recommend"><div class="score-hero"><p class="eyebrow">YOUR FIT SCORE</p><div class="score-value">${best.score}<span>/100</span></div><p class="score-rating">${escape(best.label)}</p></div><div class="recommend-copy"><p class="eyebrow">${recommended ? 'YOUR CLOSEST MATCH' : 'NO STRONG MATCH'}</p><h3>${recommended ? `Size ${escape(best.size)}` : `Closest: ${escape(best.size)}`} <span style="font-size:13px;font-weight:500">${escape(best.label)}</span></h3><p>${recommended ? 'Best match among the sizes in this chart.' : `Size ${escape(best.size)} scores highest, but may not fit comfortably.`}<br>${referenceCategory ? 'Low confidence — general reference only' : escape(best.confidence) + ' confidence'}</p></div></div><details class="fit-details"><summary>View fit details <span>+</span></summary><div class="breakdown"><h3>Your size breakdown</h3>${results.map(r => `<div class="size-result"><div class="size-line"><span class="size-label">${escape(r.size)}</span><span class="rating">${escape(r.label)}</span><span class="score-text">${r.score === null ? '—' : `${r.score}/100`}</span></div><div class="bar"><span style="width:${r.score ?? 0}%"></span></div><div class="dimension-list">${r.details.map(d => `<span class="${d.score < 90 ? 'warning' : ''}" title="Your measurement: ${d.body} cm; chart: ${escape(d.chart)} cm">${escape(names[d.field])}: ${escape(d.note)}</span>`).join('')}</div></div>`).join('')}</div><p class="disclaimer">This is a rule-based estimate, not a probability or a guarantee. Scores compare chart measurements with your body and general fit allowances. Height alone cannot predict garment length. Stretch, tailoring, oversized cuts and personal preference may change the result. Missing measurements reduce confidence.</p></details>`;
+    $('#results').innerHTML = `<div class="recommend"><div class="score-hero"><p class="eyebrow">YOUR FIT SCORE</p><div class="score-value">${best.score}<span>/100</span></div><p class="score-rating">${escape(best.label)}</p></div><div class="recommend-copy"><p class="eyebrow">${recommended ? 'YOUR CLOSEST MATCH' : 'NO STRONG MATCH'}</p><h3>${recommended ? `Size ${escape(best.size)}` : `Closest: ${escape(best.size)}`} <span style="font-size:13px;font-weight:500">${escape(best.label)}</span></h3><p>${recommended ? 'Best match among the sizes in this chart.' : `Size ${escape(best.size)} scores highest, but may not fit comfortably.`}<br>${referenceCategory ? 'Low confidence - general reference only' : escape(best.confidence) + ' confidence'}</p></div></div><details class="fit-details"><summary>View fit details <span>+</span></summary><div class="breakdown"><h3>Your size breakdown</h3>${results.map(r => `<div class="size-result"><div class="size-line"><span class="size-label">${escape(r.size)}</span><span class="rating">${escape(r.label)}</span><span class="score-text">${r.score === null ? '-' : `${r.score}/100`}</span></div><div class="bar"><span style="width:${r.score ?? 0}%"></span></div><div class="dimension-list">${r.details.map(d => `<span class="${d.score < 90 ? 'warning' : ''}" title="Your measurement: ${d.body} cm; chart: ${escape(d.chart)} cm">${escape(names[d.field])}: ${escape(d.note)}</span>`).join('')}</div></div>`).join('')}</div><p class="disclaimer">This is a rule-based estimate, not a probability or a guarantee. Scores compare chart measurements with your body and general fit allowances. Height alone cannot predict garment length. Stretch, tailoring, oversized cuts and personal preference may change the result. Missing measurements reduce confidence.</p></details>`;
     $('#results').hidden = false; $('#results').focus({preventScroll:true}); $('#results').scrollIntoView({behavior:'auto',block:'start'}); store(); notice(referenceCategory ? 'Estimate ready. Based on general sizing.' : 'Your comparison is ready.',true);
   } catch (err) { notice(err.message); } finally { $('#calculate').disabled = false; }
 });
 $('#demo').addEventListener('click', () => {
   referenceCategory = null;
-  product = {title:'Everyday cotton tee — example',brand:'FITCHECK SAMPLE · NOT A LIVE PRODUCT',url:null}; showProduct();
+  product = {title:'Everyday cotton tee - example',brand:'FITCHECK SAMPLE � NOT A LIVE PRODUCT',url:null}; showProduct();
   $('#chart-text').value = 'Size,Chest,Shoulder,Length\nS,100,43,68\nM,106,45,71\nL,112,47,74\nXL,118,49,77';
   $('#chart-unit').value = 'cm'; $('#basis').value = 'garment'; chart = [{size:'S',chest:100,shoulder:43,length:68},{size:'M',chest:106,shoulder:45,length:71},{size:'L',chest:112,shoulder:47,length:74},{size:'XL',chest:118,shoulder:49,length:77}];
-  category = 'tops'; document.querySelector('[data-category=tops]').click(); $('#chart-details').open = false; preview(); notice('Example chart loaded. Add your measurements, then compare sizes. Your measurements have not been changed.',true);
+  category = 'tops'; document.querySelector('[data-category=tops]').click(); $('#chart-details').hidden = false; preview(); notice('Example chart loaded. Add your measurements, then compare sizes. Your measurements have not been changed.',true);
 });
 
 // Transcribed inch values from the user-provided general sizing image.
@@ -113,11 +132,11 @@ $('#load-reference').addEventListener('click', () => {
     ...Object.entries(values).map(([key, measurements]) => [key, +(measurements[i] * 2.54).toFixed(2)])
   ]));
   referenceCategory = category;
-  product = { title: `${range === 'women' ? "Women's" : "Men's"} ${category} — general reference`, brand:'USER-SUPPLIED CHART · NOT PRODUCT-SPECIFIC', url:null };
+  product = { title: `${range === 'women' ? "Women's" : "Men's"} ${category} - general reference`, brand:'USER-SUPPLIED CHART � NOT PRODUCT-SPECIFIC', url:null };
   const keys = ['size', ...Object.keys(values)];
   $('#chart-text').value = [keys.join(','), ...chart.map(row => keys.map(key => row[key]).join(','))].join('\n');
   $('#chart-unit').value = 'cm'; $('#basis').value = 'body';
-  showProduct(); preview(); $('#chart-details').open = false;
+  showProduct(); preview(); $('#chart-details').hidden = false;
   notice('General sizing selected. Product-specific sizing may differ.');
 });
 
@@ -213,8 +232,8 @@ function detectPhotoChart(text, selectedGender, selectedCategory) {
   const cm = /\bcm\b|centimet(?:er|re)s?/i.test(text);
   const inches = /\binch(?:es)?\b|\(\s*in\s*\)|\bmeasurements?\s+(?:are\s+)?in\s+in\b/i.test(text);
 
-  const women = /\bwomen(?:['’]s)?\b|\bfemale\b/i.test(text);
-  const men = /\bmen(?:['’]s)?\b|\bmale\b/i.test(text);
+  const women = /\bwomen(?:['']s)?\b|\bfemale\b/i.test(text);
+  const men = /\bmen(?:['']s)?\b|\bmale\b/i.test(text);
   if (women && men) throw new Error('This photo contains multiple charts. Upload just the chart matching your filters.');
   if ((women && selectedGender === 'men') || (men && selectedGender === 'women')) throw new Error('This chart does not match the selected gender. Change the filter or photo.');
   const tops = /\b(tops?|shirts?|hoodies?|tees?|t-shirts?)\b/i.test(text);
@@ -330,7 +349,7 @@ $('#chart-photo-form').addEventListener('submit', async e => {
   try {
     const file = selectedChartPhoto();
     button.disabled = true; $('#chart-photo').disabled = true;
-    button.textContent = 'Reading…'; $('#photo-status').textContent = 'Loading photo reader…';
+    button.textContent = 'Reading.'; $('#photo-status').textContent = 'Loading photo reader.';
     const reader = await loadPhotoReader();
     if (job !== photoJob) return;
     worker = await reader.createWorker('eng', 1, { logger: progress => {
@@ -344,7 +363,7 @@ $('#chart-photo-form').addEventListener('submit', async e => {
     for (const pass of [{mode:'6'}, {mode:'11'}, {mode:'6', threshold:true}, {mode:'4'}, {mode:'11', threshold:true}]) {
       const lowerHalf = !!pass.lowerHalf;
       if (job !== photoJob) return;
-      $('#photo-status').textContent = lowerHalf ? 'Taking a closer look at the chart…' : 'Enhancing small text…';
+      $('#photo-status').textContent = lowerHalf ? 'Taking a closer look at the chart.' : 'Enhancing small text.';
       const image = await prepareChartPhoto(file, lowerHalf, !!pass.threshold);
       await worker.setParameters({tessedit_pageseg_mode: pass.mode});
       const {data} = await worker.recognize(image);
@@ -381,7 +400,14 @@ $('#chart-photo-form').addEventListener('submit', async e => {
       return;
     }
     applyPhotoChart(bestRows, bestInfo, bestText, photoGender, photoCategory);
-  } catch (err) { if (job === photoJob) $('#photo-status').textContent = err.message || 'Could not read this photo. Try another image.'; }
+  } catch (err) {
+    if (job === photoJob) {
+      $('#chart-details').hidden = false;
+      $('#photo-status').textContent = /fetch|network|load.*failed/i.test(err.message || '')
+        ? 'The photo reader could not download its OCR assets. Check your connection or content blocker and retry. You can also paste the chart in the editor below.'
+        : err.message || 'Could not read this photo. Try another image or paste the chart below.';
+    }
+  }
   finally {
     if (worker) await worker.terminate().catch(() => {});
     if (job === photoJob) { activePhotoWorker = null; button.disabled = false; $('#chart-photo').disabled = false; button.textContent = 'Read chart'; }
@@ -396,6 +422,7 @@ function applyPhotoChart(rows, info, text, chartGender, chartCategory) {
     analyzedGender = chartGender; analyzedCategory = chartCategory;
     $('#chart-unit').value = info.unit; $('#basis').value = info.basis;
     $('#chart-text').value = text; photoExtractedText = text;
+    $('#chart-details').hidden = false;
     preview();
     $('#photo-status').textContent = 'Chart ready. Fit results are estimates.';
     notice('Chart analyzed. Ready to compare.', true);
@@ -442,3 +469,5 @@ dropZone.addEventListener('dragleave',e=>{if(!dropZone.contains(e.relatedTarget)
 dropZone.addEventListener('drop',e=>{e.preventDefault();dropZone.classList.remove('dragging');if($('#chart-photo').disabled)return;const files=e.dataTransfer.files;if(files.length!==1){$('#photo-status').textContent='Please drop one size-chart image at a time.';return;}$('#chart-photo').files=files;$('#chart-photo').dispatchEvent(new Event('change',{bubbles:true}));});
 document.addEventListener('visibilitychange',()=>document.body.classList.toggle('page-hidden',document.hidden));
 new IntersectionObserver(entries=>{for(const entry of entries)entry.target.style.animationPlayState=entry.isIntersecting?'running':'paused';}).observe($('.scan-loader span'));
+
+
