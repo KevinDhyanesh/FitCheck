@@ -44,7 +44,7 @@ npm test
 
 The score is a heuristic, not a probability or a guarantee of fit. OCR can misread poor images. Missing measurements, fabric stretch and garment cuts affect accuracy. This app does not train a machine-learning model from uploads.
 
-Photo recognition runs in the browser using Tesseract.js loaded from a CDN; internet access is needed for the reader and language assets. Extracted chart data and body measurements go to the local server for comparison. Retailer imports can fail for blocked or JavaScript-only pages.
+Photo recognition runs in the browser using Tesseract.js loaded from a CDN; internet access is needed for the reader and language assets. Chart parsing and fit comparison run in the browser using the same modules as the server, so they do not require API requests. Product links still require the Node server; retailer imports can fail for blocked or JavaScript-only pages. The visible chart editor provides a manual fallback when a photo or product cannot be read.
 
 The server binds to loopback. This is a local application, not a production multi-user service. GitHub Pages alone cannot run the Node API.
 
@@ -55,3 +55,5 @@ The fitting studio uses warm ivory, ink and acid-lime accents, an open measureme
 ## Font attribution
 
 The current interface references system fonts (Impact, Arial and Courier New) with fallbacks; it does not download or redistribute them. The retained Scota font is an unused demo by Limitype. See `public/fonts/Scota-Readme.txt`. A commercial license is not included; check the vendor terms before commercial use.
+
+
