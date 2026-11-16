@@ -48,6 +48,10 @@ Photo recognition runs in the browser using Tesseract.js loaded from a CDN; inte
 
 The server binds to loopback. This is a local application, not a production multi-user service. GitHub Pages alone cannot run the Node API.
 
+## Interface
+
+The fitting studio uses warm ivory, ink and acid-lime accents, an open measurement sheet, and a lightweight SVG/CSS garment with rotation controls and measurement guides. Keyboard focus and reduced-motion preferences are supported. The garment is illustrative; it does not simulate cloth or body shape.
+
 ## Font attribution
 
-The included Scota font is a demo by Limitype. See `public/fonts/Scota-Readme.txt`. A commercial license is not included; check the vendor terms before commercial use.
+The current interface references system fonts (Impact, Arial and Courier New) with fallbacks; it does not download or redistribute them. The retained Scota font is an unused demo by Limitype. See `public/fonts/Scota-Readme.txt`. A commercial license is not included; check the vendor terms before commercial use.
