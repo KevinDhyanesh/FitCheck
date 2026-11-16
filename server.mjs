@@ -52,7 +52,7 @@ export async function handleRequest(req, res) {
       return json(200, { results: scoreSizes(body.profile, body.chart, body) });
     }
     if (req.method !== 'GET') return json(405, { error: 'Method not allowed' });
-    const files = { '/': ['index.html','text/html'], '/app.js': ['app.js','text/javascript'], '/style.css': ['style.css','text/css'] };
+    const files = { '/brand-mark.svg': ['brand-mark.svg','image/svg+xml'], '/': ['index.html','text/html'], '/app.js': ['app.js','text/javascript'], '/style.css': ['style.css','text/css'] };
     const file = files[req.url?.split('?')[0]];
     if (!file) return json(404, { error: 'Not found' });
     res.writeHead(200, { 'Content-Type': `${file[1]}; charset=utf-8`, 'X-Content-Type-Options': 'nosniff' }); res.end(await readFile(root + file[0]));
