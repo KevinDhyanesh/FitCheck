@@ -1,7 +1,8 @@
 const decode = s => s.replace(/&nbsp;|&#160;/gi, ' ').replace(/&amp;/gi, '&').replace(/&quot;/gi, '"').replace(/&#39;/g, "'").replace(/&lt;/gi, '<').replace(/&gt;/gi, '>');
 const clean = s => decode(s.replace(/<[^>]*>/g, ' ')).replace(/\s+/g, ' ').trim();
 const header = s => {
-  s = s.toLowerCase();
+  s = s.toLowerCase().replace(/_/g, ' ');
+  if (/sleeve/.test(s)) return null;
   if (/size|label/.test(s)) return 'size';
   if (/inseam|inside leg/.test(s)) return 'inseam';
   if (/shoulder/.test(s)) return 'shoulder';
@@ -15,6 +16,12 @@ export function parseChart(text, unit = 'cm') {
   let rows;
   if (/<tr[\s>]/i.test(text)) rows = [...text.matchAll(/<tr\b[^>]*>([\s\S]*?)<\/tr>/gi)].map(r => [...r[1].matchAll(/<t[dh]\b[^>]*>([\s\S]*?)<\/t[dh]>/gi)].map(c => clean(c[1])));
   else rows = text.trim().split(/\r?\n/).filter(Boolean).map(r => r.trim().split(/\t|\s*\|\s*|\s*,\s*|\s*;\s*|\s{2,}/).map(clean));
+  // Some brand charts put sizes across the top and measurement names down the side.
+  const sizeRow = rows.findIndex(r => /^(sizes?|measurements?)$/i.test(r[0] || '') && r.slice(1).filter(c => /^(?:[2-5]?X{0,3}[SML]|\d{1,3})$/i.test(c)).length >= 2);
+  if (sizeRow >= 0 && rows.slice(sizeRow + 1).some(r => header(r[0]) && header(r[0]) !== 'size')) {
+    const source = rows.slice(sizeRow);
+    if (!source[0].some(c => header(c) && header(c) !== 'size')) { source[0][0] = 'Size'; rows = source[0].map((_, col) => source.map(r => r[col] || '')); }
+  }
   const i = rows.findIndex(r => r.some(c => header(c) === 'size') && r.some(c => header(c) && header(c) !== 'size'));
   if (i < 0) return [];
   const keys = rows[i].map(header);
