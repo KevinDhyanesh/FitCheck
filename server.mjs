@@ -23,14 +23,14 @@ async function productPage(raw) {
       import('node:https').then(({get}) => {
         const req = get(url, { headers: { 'User-Agent': 'Fitcheck/1.0 personal size-chart reader', Accept: 'text/html' }, lookup: (_host, opts, cb) => opts.all ? cb(null, addresses) : cb(null, addresses[0].address, 4) }, res => {
           if ([301,302,303,307,308].includes(res.statusCode)) { res.resume(); resolve({ redirect: res.headers.location }); return; }
-          if (res.statusCode !== 200) { res.resume(); reject(new Error('The store blocked access or the page is unavailable. Paste its size chart below.')); return; }
+          if (res.statusCode !== 200) { res.resume(); reject(new Error('The store blocked access or the page is unavailable. Upload a photo of its size chart instead.')); return; }
           if (!/text\/html/i.test(res.headers['content-type'] || '')) { res.resume(); reject(new Error('This link does not point to a product webpage.')); return; }
           let bytes = 0, chunks = [];
-          res.on('data', c => { bytes += c.length; if (bytes > 3_000_000) req.destroy(new Error('This page is too large. Paste the size chart instead.')); else chunks.push(c); });
+          res.on('data', c => { bytes += c.length; if (bytes > 3_000_000) req.destroy(new Error('This page is too large. Upload a photo of the size chart instead.')); else chunks.push(c); });
           res.on('end', () => resolve({ html: Buffer.concat(chunks).toString('utf8') }));
           res.on('error', reject);
         });
-        const timer = setTimeout(() => req.destroy(new Error('The store took too long. Paste the size chart instead.')), 12000);
+        const timer = setTimeout(() => req.destroy(new Error('The store took too long. Upload a photo of the size chart instead.')), 12000);
         req.on('close', () => clearTimeout(timer)); req.on('error', reject);
       }).catch(reject);
     });
@@ -42,6 +42,7 @@ async function productPage(raw) {
 export async function handleRequest(req, res) {
   const json = (code, data) => { res.writeHead(code, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); res.end(JSON.stringify(data)); };
   try {
+    if (req.method === 'GET' && req.url === '/api/health') return json(200, {ok:true});
     if (req.method === 'POST' && ['/api/import','/api/check','/api/parse'].includes(req.url)) {
       if (req.headers.origin && req.headers.origin !== `http://${req.headers.host}`) return json(403, { error: 'Cross-origin request rejected.' });
       let raw = ''; for await (const chunk of req) { raw += chunk; if (raw.length > 60000) return json(413, { error: 'Input is too large.' }); }
@@ -52,12 +53,12 @@ export async function handleRequest(req, res) {
       return json(200, { results: scoreSizes(body.profile, body.chart, body) });
     }
     if (req.method !== 'GET') return json(405, { error: 'Method not allowed' });
-    const files = { '/brand-mark.svg': ['brand-mark.svg','image/svg+xml'], '/': ['index.html','text/html'], '/app.js': ['app.js','text/javascript'], '/style.css': ['style.css','text/css'] };
+    const files = { '/api-client.mjs': ['api-client.mjs','text/javascript'], '/fit.mjs': ['../fit.mjs','text/javascript'], '/extract.mjs': ['../extract.mjs','text/javascript'], '/brand-mark.svg': ['brand-mark.svg','image/svg+xml'], '/': ['index.html','text/html'], '/app.js': ['app.js','text/javascript'], '/style.css': ['style.css','text/css'] };
     const file = files[req.url?.split('?')[0]];
     if (!file) return json(404, { error: 'Not found' });
-    res.writeHead(200, { 'Content-Type': `${file[1]}; charset=utf-8`, 'X-Content-Type-Options': 'nosniff' }); res.end(await readFile(root + file[0]));
-  } catch (e) { json(400, { error: e.message || 'Something went wrong.' }); }
+    res.writeHead(200, { 'Cache-Control': 'no-store', 'Content-Type': `${file[1]}; charset=utf-8`, 'X-Content-Type-Options': 'nosniff' }); res.end(await readFile(root + file[0]));
+  } catch (e) { json(400, { error: /proxy|tunnel|ECONN|ENOTFOUND|EAI_AGAIN|ETIMEDOUT|fetch failed/i.test(e.message || '') ? 'Could not connect to the store. Check the server internet connection, or upload a size-chart photo. Your existing chart is kept.' : e.message || 'Something went wrong.' }); }
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  http.createServer(handleRequest).listen(Number(process.env.PORT) || 3000, '127.0.0.1', () => console.log('Fitcheck is ready at http://localhost:3000'));
+  http.createServer(handleRequest).listen(Number(process.env.PORT) || 3000, '127.0.0.1', () => console.log(`Fitcheck is ready at http://127.0.0.1:${Number(process.env.PORT) || 3000}`));
 }
