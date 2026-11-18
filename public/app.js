@@ -1,3 +1,6 @@
+import { parseChart } from '/extract.mjs';
+import { scoreSizes } from '/fit.mjs';
+import { requestApi } from '/api-client.mjs';
 const $ = s => document.querySelector(s);
 const names = { height: 'Height', chest: 'Chest', waist: 'Waist', hip: 'Hips', shoulder: 'Shoulders', length: 'Desired top length', inseam: 'Desired inseam' };
 let unit = 'cm', category = 'tops', chart = [], product = null;
@@ -12,9 +15,12 @@ function preference() { return $('input[name=preference]:checked').value; }
 function invalidate() { $('#results').hidden = true; }
 function notice(message, success = false) { $('#status').innerHTML = `<div class="notice ${success ? 'success' : ''}">${escape(message)}</div>`; }
 async function api(route, data) {
-  const response = await fetch(`/api/${route}`, { method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(data) });
-  const result = await response.json(); if (!response.ok) throw new Error(result.error); return result;
+  // OCR already runs here: keep parsing/scoring independent of the server lifetime.
+  if (route === 'parse') return {chart: parseChart(data.text || '', data.unit)};
+  if (route === 'check') return {results: scoreSizes(data.profile, data.chart, data)};
+  return requestApi(route, data);
 }
+
 function store() {
   try { localStorage.setItem('fitcheck-profile', JSON.stringify({ profile: readProfile(), preference: preference() })); $('#save-note').textContent = '✓ Measurements saved on this browser.'; }
   catch { $('#save-note').textContent = 'Storage unavailable. You can still check your fit.'; }
@@ -52,15 +58,19 @@ function showProduct() {
   $('#source-link').hidden = !product.url; if (product.url) $('#source-link').href = product.url;
 }
 $('#import-form').addEventListener('submit', async e => {
-  e.preventDefault(); referenceCategory = null; chart = []; product = null; preview(); showProduct(); $('#chart-text').value = ''; $('#import').disabled = true; $('#import').textContent = 'Reading…'; notice('Looking for product details and a size table…');
+  e.preventDefault(); const importJob = photoJob; $('#import').disabled = true; $('#import').textContent = 'Reading…'; notice('Looking for product details and a size table…');
   try {
-    product = await api('import', {url:$('#url').value}); chart = product.chart; showProduct(); preview(); $('#chart-details').open = false;
+    const imported = await api('import', {url:$('#url').value});
+    if (importJob !== photoJob) return; // A newer uploaded photo owns the workspace.
+    if (!imported.chart?.length) { notice('Product found, but its size chart is not available as a readable table. Upload the chart photo below. Your existing chart is kept.'); return; }
+    referenceCategory = null; product = imported; chart = imported.chart; analyzedGender = null; analyzedCategory = null; photoExtractedText = null; $('#basis').value = imported.basis || 'garment'; showProduct(); preview(); $('#chart-details').open = false;
     if (chart.length) {
       const keys = ['size','chest','shoulder','waist','hip','length','inseam'].filter(k => chart.some(r => r[k] != null));
       $('#chart-text').value = [keys.join(','), ...chart.map(r => keys.map(k => r[k] ?? '').join(','))].join('\n'); $('#chart-unit').value = 'cm';
       notice('Chart loaded. Ready to compare.', true);
+      if (readProfile()[category === 'tops' ? 'chest' : 'waist']) $('#calculate').click();
     } else notice('Product details found, but no readable size table. Upload a photo of the brand size chart below.');
-  } catch (err) { notice(err.message); $('#chart-details').open = false; }
+  } catch (err) { if (importJob === photoJob) notice(err.message); $('#chart-details').open = false; }
   finally { $('#import').disabled = false; $('#import').textContent = 'Read link ↗'; }
 });
 $('#apply-chart').addEventListener('click', async () => {
